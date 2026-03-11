@@ -1,50 +1,63 @@
-import { readUsers, writeUsers } from "../utils/filehelper.js";
+import { prisma } from "../config/prisma.js";
+import { userSchema } from "../validator/users.validator.js";
 
 class UserService {
-    findAll() {
-        return readUsers();
+    async findAll() {
+        return await prisma.user.findMany();
     }
 
-    findById(id) {
-        const users = this.findAll();
-        // Attention : force le type en nombre si tes IDs sont des nombres
-        const user = users.find((u) => u.id === Number(id));
+    async findById(id) {
+        const user = await prisma.user.findUnique({
+            where: { id: id },
+        });
         return user || null;
     }
 
-    createUser({ name, age }) {
-        if (!name || !age) return null;
+    async createUser(data) {
+        // 1. Validation avec Zod
+        const result = userSchema.safeParse(data);
+        
+        if (!result.success) {
+            const formattedErrors = result.error.errors.map((err) => ({
+                path: err.path.join(','),
+                message: err.message
+            }));
+            
+            const error = new Error('Validation failed');
+            error.statusCode = 400;
+            error.details = formattedErrors; // Changé 'errors.errors' qui n'existait pas
+            throw error;
+        }
 
-        const users = this.findAll();
-        const newUser = {
-            id: users.length > 0 ? users[users.length - 1].id + 1 : 1,
-            name,
-            age
-        };
-
-        users.push(newUser);
-        writeUsers(users);
+        // 2. Création dans Prisma
+        const newUser = await prisma.user.create({
+            data: {
+                name: data.name,
+                email: data.email
+            }
+        });
         return newUser;
     }
 
-    updateUser(id, { name, age }) {
-        const users = this.findAll();
-        const user = users.find((u)=> u.id == id)
-        if(!user) return null
-        user.name = name
-        user.age = age 
-        writeUsers(users)
-        return users;
+    async updateUser(id, { name, email }) {
+        const user = await this.findById(id);
+        if (!user) return null;
+
+        return await prisma.user.update({
+            where: { id: id },
+            data: { name, email },
+        });
     }
 
-    deleteUser(id){
-        const users = this.findAll()
-                const user = users.find((u)=> u.id == id)
-if(!user) return false
-const _users = users.filter((u) => u.id !== id)
-writeUsers(_users)
-return true 
+    async deleteUser(id) {
+        const user = await this.findById(id);
+        if (!user) return false;
+
+        await prisma.user.delete({
+            where: { id: id },
+        });
+        return true;
     }
 }
 
-export default UserService;
+export default new UserService(); // Export d'une instance pour plus de simplicité
